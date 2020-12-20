@@ -1,122 +1,75 @@
 import os
+import argparse
+import json
+import logging
 from terrasnek.api import TFC
-from functions import *
+from tfc_migrate.migrator import TFCMigrator
 
-# SOURCE ORG
-TFE_TOKEN_ORIGINAL = os.getenv("TFE_TOKEN_ORIGINAL", None)
-TFE_URL_ORIGINAL = os.getenv("TFE_URL_ORIGINAL", None)
-TFE_ORG_ORIGINAL = os.getenv("TFE_ORG_ORIGINAL", None)
+DEFAULT_VCS_FILE = "vcs.json"
+DEFAULT_SENSITIVE_DATA_FILE = "sensitive_data.txt"
 
-api_original = TFC(TFE_TOKEN_ORIGINAL, url=TFE_URL_ORIGINAL)
-api_original.set_org(TFE_ORG_ORIGINAL)
+# Source Org
+TFE_TOKEN_SOURCE = os.getenv("TFE_TOKEN_SOURCE", None)
+TFE_URL_SOURCE = os.getenv("TFE_URL_SOURCE", None)
+TFE_ORG_SOURCE = os.getenv("TFE_ORG_SOURCE", None)
 
-# NEW ORG
-TFE_TOKEN_NEW = os.getenv("TFE_TOKEN_NEW", None)
-TFE_URL_NEW = os.getenv("TFE_URL_NEW", None)
-TFE_ORG_NEW = os.getenv("TFE_ORG_NEW", None)
-TFE_OAUTH_NEW = os.getenv("TFE_OAUTH_NEW", None)
+# Target Org
+TFE_TOKEN_TARGET = os.getenv("TFE_TOKEN_TARGET", None)
+TFE_URL_TARGET = os.getenv("TFE_URL_TARGET", None)
+TFE_ORG_TARGET = os.getenv("TFE_ORG_TARGET", None)
 
-api_new = TFC(TFE_TOKEN_NEW, url=TFE_URL_NEW)
-api_new.set_org(TFE_ORG_NEW)
+# NOTE: this is parsed in the main function
+TFE_VCS_CONNECTION_MAP = None
+SENSITIVE_DATA_MAP = None
 
+
+def main(migrator, delete_all, no_confirmation, migrate_all_state, migrate_sensitive_data):
+
+    if delete_all:
+        migrator.delete_all_from_target(no_confirmation)
+    elif migrate_sensitive_data:
+        migrator.migrate_sensitive()
+    else:
+        migrator.migrate_all(migrate_all_state)
 
 if __name__ == "__main__":
-    teams_map = migrate_teams(api_original, api_new)
-    print('teams successfully migrated')
+    parser = argparse.ArgumentParser(description='Migrate from one TFE/C org to another TFE/C org')
+    parser.add_argument('--vcs-file-path', dest="vcs_file_path", default=DEFAULT_VCS_FILE, \
+        help="Path to the VCS JSON file. Defaults to `vcs.json`.")
+    parser.add_argument('--migrate-all-state', dest="migrate_all_state", action="store_true", \
+        help="Migrate all state history workspaces. Default behavior is only current state.")
+    parser.add_argument('--sensitive-data-file-path', dest="sensitive_data_file_path", \
+        default=DEFAULT_SENSITIVE_DATA_FILE, \
+            help="Path the the sensitive values file. Defaults to `sensitive_data.txt`.")
+    parser.add_argument('--migrate-sensitive-data', dest="migrate_sensitive_data", action="store_true", \
+        help="Migrate sensitive data to the target organization.")
+    parser.add_argument('--delete-all', dest="delete_all", action="store_true", \
+        help="Delete all resources from the target API.")
+    parser.add_argument('--no-confirmation', dest="no_confirmation", action="store_true", \
+        help="If set, don't ask for confirmation before deleting all target resources.")
+    parser.add_argument('--debug', dest="debug", action="store_true", \
+        help="If set, run the logger in debug mode.")
+    args = parser.parse_args()
 
-    # migrate_organization_memberships(api_original, api_new, teams_map)
-    # print('organization memberships successfully migrated')
+    api_source = TFC(TFE_TOKEN_SOURCE, url=TFE_URL_SOURCE)
+    api_source.set_org(TFE_ORG_SOURCE)
 
-    ssh_keys_map, ssh_key_name_map = migrate_ssh_keys(api_original, api_new)
-    print('ssh keys successfully migrated')
+    api_target = TFC(TFE_TOKEN_TARGET, url=TFE_URL_TARGET)
+    api_target.set_org(TFE_ORG_TARGET)
 
-    # migrate_ssh_key_files(api_new, ssh_key_name_map, ssh_key_file_path_map)
-    # print('ssh key files successfully migrated')
+    with open(args.vcs_file_path, "r") as f:
+        TFE_VCS_CONNECTION_MAP = json.loads(f.read())
 
-    agent_pool_id = migrate_agent_pools(
-        api_original, api_new, TFE_ORG_ORIGINAL, TFE_ORG_NEW)
-    print('agent pools successfully migrated')
+    with open(args.sensitive_data_file_path) as f:
+        SENSITIVE_DATA_MAP = json.loads(f.read())
 
-    workspaces_map, workspace_to_ssh_key_map = migrate_workspaces(
-        api_original, api_new, TFE_OAUTH_NEW, agent_pool_id)
-    print('workspaces successfully migrated')
+    log_level = logging.INFO
 
-    # migrate_all_state(api_original, api_new, TFE_ORG_ORIGINAL, workspaces_map)
-    migrate_current_state(api_original, api_new,
-                          TFE_ORG_ORIGINAL, workspaces_map)
-    print('state successfully migrated')
+    if args.debug:
+        log_level = logging.DEBUG
 
-    # Note: if you wish to generate a map of Sensitive variables that can be used to update
-    # those values via the migrate_workspace_sensitive_variables method, pass True as the final argument (defaults to False)
-    sensitive_variable_data = migrate_workspace_variables(
-        api_original, api_new, TFE_ORG_ORIGINAL, workspaces_map)
-    print('workspace variables successfully migrated')
+    logging.basicConfig(level=log_level)
 
-    # migrate_workspace_sensitive_variables(api_new, sensitive_variable_data_map)
-    # print('workspace sensitive variables successfully migrated')
+    migrator = TFCMigrator(api_source, api_target, TFE_VCS_CONNECTION_MAP, SENSITIVE_DATA_MAP, log_level)
 
-    migrate_ssh_keys_to_workspaces(
-        api_original, api_new, workspaces_map, workspace_to_ssh_key_map, ssh_keys_map)
-    print('workspace ssh keys successfully migrated')
-
-    migrate_workspace_run_triggers(api_original, api_new, workspaces_map)
-    print('workspace run triggers successfully migrated')
-
-    migrate_workspace_notifications(api_original, api_new, workspaces_map)
-    print('workspace notifications successfully migrated')
-
-    migrate_workspace_team_access(
-        api_original, api_new, workspaces_map, teams_map)
-    print('workspace team access successfully migrated')
-
-    workspace_to_configuration_version_map = migrate_configuration_versions(
-        api_original, api_new, workspaces_map)
-    print('workspace configuration versions successfully migrated')
-
-    # migrate_configuration_files(api_new, workspace_to_configuration_version_map, workspace_to_file_path_map)
-    # print('workspace configuration files successfully migrated)
-
-    policies_map = migrate_policies(
-        api_original, api_new, TFE_TOKEN_ORIGINAL, TFE_URL_ORIGINAL)
-    print('policies successfully migrated')
-
-    policy_sets_map = migrate_policy_sets(
-        api_original, api_new, TFE_OAUTH_NEW, workspaces_map, policies_map)
-    print('policy sets successfully migrated')
-
-    # Note: if you wish to generate a map of Sensitive policy set parameters that can be used to update
-    # those values via the migrate_policy_set_sensitive_variables method, pass True as the final argument (defaults to False)
-    sensitive_policy_set_parameter_data = migrate_policy_set_parameters(
-        api_original, api_new, policy_sets_map)
-    print('policy set parameters successfully migrated')
-
-    # migrate_policy_set_sensitive_parameters(api_new, sensitive_policy_set_parameter_data_map)
-    # print('policy set sensitive parameters successfully migrated')
-
-    migrate_registry_modules(api_original, api_new,
-                             TFE_ORG_ORIGINAL, TFE_OAUTH_NEW)
-    print('registry modules successfully migrated')
-
-    print('\n')
-    print('MIGRATION MAPS:')
-    print('teams_map:', teams_map)
-    print('\n')
-    print('ssh_keys_map:', ssh_keys_map)
-    print('\n')
-    print('ssh_keys_map:', ssh_key_name_map)
-    print('\n')
-    print('workspaces_map:', workspaces_map)
-    print('\n')
-    print('workspace_to_ssh_key_map:', workspace_to_ssh_key_map)
-    print('\n')
-    print('workspace_to_configuration_version_map:',
-          workspace_to_configuration_version_map)
-    print('\n')
-    print('policies_map:', policies_map)
-    print('\n')
-    print('policy_sets_map:', policy_sets_map)
-    print('\n')
-    print('sensitive_policy_set_parameter_data:',
-          sensitive_policy_set_parameter_data)
-    print('\n')
-    print('sensitive_variable_data:', sensitive_variable_data)
+    main(migrator, args.delete_all, args.no_confirmation, args.migrate_all_state, args.migrate_sensitive_data)
