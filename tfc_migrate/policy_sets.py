@@ -11,6 +11,9 @@ class PolicySetsWorker(TFCMigratorBaseWorker):
     TFC/E org to another TFC/E org.
     """
 
+    _api_module_used = "policy_sets"
+    _required_entitlements = ["sentinel"]
+
     def migrate_all(self, workspaces_map, policies_map):
         """
         Function to migrate all policy sets from one TFC/E org to another TFC/E org.
@@ -32,7 +35,7 @@ class PolicySetsWorker(TFCMigratorBaseWorker):
             source_policy_set_name = source_policy_set["attributes"]["name"]
 
             if source_policy_set_name in target_policy_sets_data:
-                policies_map[source_policy_set["id"]] = \
+                policy_sets_map[source_policy_set["id"]] = \
                     target_policy_sets_data[source_policy_set_name]
                 self._logger.info("Policy set: %s, exists. Skipped.", source_policy_set_name)
                 continue

@@ -11,6 +11,9 @@ class SSHKeysWorker(TFCMigratorBaseWorker):
     TFC/E org to another TFC/E org.
     """
 
+    _api_module_used = "ssh_keys"
+    _required_entitlements = []
+
     def migrate_all(self):
         """
         Function to migrate all SSH keys from one TFC/E org to another TFC/E org.
@@ -39,6 +42,7 @@ class SSHKeysWorker(TFCMigratorBaseWorker):
             if source_ssh_key_name in target_ssh_keys_data:
                 ssh_keys_map[source_ssh_key_id] = target_ssh_keys_data[source_ssh_key_name]
                 ssh_key_name_map[source_ssh_key_name] = target_ssh_keys_data[source_ssh_key_name]
+                ssh_key_to_file_path_map.append({"ssh_key_name":source_ssh_key_name, "path_to_ssh_key_file":""})
                 self._logger.info("SSH Key: %s, exists. Skipped.", source_ssh_key_name)
                 continue
 
@@ -84,7 +88,8 @@ class SSHKeysWorker(TFCMigratorBaseWorker):
 
             for ssh_key in ssh_key_to_file_path_map:
                 # Pull SSH key data
-                get_ssh_key = open(ssh_key_to_file_path_map["path_to_ssh_key_file"], "r")
+                ssh_key_name = ssh_key["ssh_key_name"]
+                get_ssh_key = open(ssh_key["path_to_ssh_key_file"], "r")
                 ssh_key_data = get_ssh_key.read()
 
                 # Build the new ssh key file payload
@@ -97,7 +102,7 @@ class SSHKeysWorker(TFCMigratorBaseWorker):
                     }
                 }
 
-                self._logger.info("SSH key: %s, key data uploaded.", ssh_key)
+                self._logger.info("SSH key: %s, key data uploaded.", ssh_key_name)
 
                 # Upload the SSH key file to the target organization
                 self._api_target.ssh_keys.update(ssh_key_name_map[ssh_key["ssh_key_name"]], new_ssh_key_file_payload)

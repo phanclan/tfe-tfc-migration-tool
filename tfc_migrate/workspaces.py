@@ -10,6 +10,9 @@ class WorkspacesWorker(TFCMigratorBaseWorker):
     TFC/E org to another TFC/E org.
     """
 
+    _api_module_used = "workspaces"
+    _required_entitlements = []
+
     def migrate_all(self, agent_pools_map):
         """
         Function to migrate all workspaces from one TFC/E org to another TFC/E org.
@@ -75,7 +78,7 @@ class WorkspacesWorker(TFCMigratorBaseWorker):
 
             # Set agent pool ID unless target is TFE
             if source_workspace["attributes"]["execution-mode"] == "agent":
-                if 'app.terraform.io' in self._api_target.get_url():
+                if agent_pools_map and 'app.terraform.io' in self._api_target.get_url():
                     new_workspace_payload["data"]["attributes"]["agent-pool-id"] = \
                         agent_pools_map[\
                             source_workspace["relationships"]["agent-pool"]["data"]["id"]]
@@ -119,7 +122,7 @@ class WorkspacesWorker(TFCMigratorBaseWorker):
 
         self._logger.info("Deleting workspaces...")
 
-        workspaces = self._api_target.workspaces.list()["data"]
+        workspaces = self._api_target.workspaces.list_all()
 
         if workspaces:
             for workspace in workspaces:

@@ -63,19 +63,30 @@ class TFCMigrator(ABC):
         self.workspace_ssh_keys = \
             WorkspaceSSHKeysWorker(api_source, api_target, vcs_connection_map, sensitive_data_map, log_level)
 
-    def migrate_all(self, migrate_all_state):
+    def migrate_all(self, migrate_all_state, tfe_verify_source):
         """
         NOTE: org_memberships.migrate only sends out invites, as such, it's commented out.
         The users must exist in the system ahead of time if you want to use this.
         Lastly, since most customers use SSO, this function isn't terribly useful.
         """
+
+        # Declare empty maps for all the migrator values that might not work across
+        # TFE / TFC or if they may need to be properly entitled.
+        # entitlements are not valid.
+        teams_map = {}
+        agent_pools_map = {}
+        policies_map = {}
+        policy_sets_map = {}
+        sensitive_policy_set_parameter_data = {}
+
         # TODO: org_membership_map = org_memberships.migrate(api_source, api_target, teams_map)
+        if self.teams.is_valid_migration():
+            teams_map = self.teams.migrate_all()
 
-        teams_map = self.teams.migrate_all()
+        ssh_keys_map, ssh_key_name_map, ssh_key_to_file_path_map = self.ssh_keys.migrate_all()
 
-        ssh_keys_map, ssh_key_name_map, ssh_key_file_path_map = self.ssh_keys.migrate_all()
-
-        agent_pools_map = self.agent_pools.migrate_all()
+        if self.agent_pools.is_valid_migration():
+            agent_pools_map = self.agent_pools.migrate_all()
 
         workspaces_map, workspace_to_ssh_key_map = self.workspaces.migrate_all(agent_pools_map)
 
@@ -84,28 +95,33 @@ class TFCMigrator(ABC):
         sensitive_variable_data = self.workspace_vars.migrate_all(workspaces_map)
 
         if migrate_all_state:
-            self.state_versions.migrate_all(workspaces_map)
+            self.state_versions.migrate_all(workspaces_map, tfe_verify_source)
         else:
-            self.state_versions.migrate_current(workspaces_map)
+            self.state_versions.migrate_current(workspaces_map, tfe_verify_source)
 
         self.run_triggers.migrate_all(workspaces_map)
 
         self.notification_configs.migrate_all(workspaces_map)
 
-        self.team_access.migrate_all(workspaces_map, teams_map)
+        if self.team_access.is_valid_migration():
+            self.team_access.migrate_all(workspaces_map, teams_map)
 
         workspace_to_config_version_upload_url_map, workspace_to_config_version_file_path_map = self.config_versions.migrate_all(workspaces_map)
 
-        policies_map = self.policies.migrate_all()
+        if self.policies.is_valid_migration():
+            policies_map = self.policies.migrate_all()
 
-        policy_sets_map = self.policy_sets.migrate_all(workspaces_map, policies_map)
+        if self.policy_sets.is_valid_migration():
+            policy_sets_map = self.policy_sets.migrate_all(workspaces_map, policies_map)
 
         # This function returns the information that is needed to publish sensitive
         # variables, but cannot retrieve the values themselves, so those values will
         # have to be updated separately.
-        sensitive_policy_set_parameter_data = self.policy_set_params.migrate_all(policy_sets_map)
+        if self.policy_sets.is_valid_migration():
+            sensitive_policy_set_parameter_data = self.policy_set_params.migrate_all(policy_sets_map)
 
-        module_to_module_version_upload_url_map, module_to_file_path_map = self.registry_module_versions.migrate_all()
+        if self.registry_module_versions.is_valid_migration():
+            self.registry_module_versions.migrate_all()
 
 
         output_json = {
@@ -117,31 +133,27 @@ class TFCMigrator(ABC):
             "policies_map": policies_map,
             "policy_sets_map": policy_sets_map,
             "workspace_to_config_version_upload_url_map": workspace_to_config_version_upload_url_map,
-            "module_to_module_version_upload_url_map": module_to_module_version_upload_url_map,
             "workspace_to_config_version_file_path_map": workspace_to_config_version_file_path_map,
-            "module_to_file_path_map": module_to_file_path_map,
-            "ssh_key_file_path_map": ssh_key_file_path_map,
+            "ssh_key_to_file_path_map": ssh_key_to_file_path_map,
             "sensitive_policy_set_parameter_data": sensitive_policy_set_parameter_data,
             "sensitive_variable_data": sensitive_variable_data
         }
 
         print(json.dumps(output_json))
 
-    
+
     def migrate_sensitive(self):
         self.config_versions.migrate_config_files()
-        
+
         self.ssh_keys.migrate_key_files()
-        
-        self. policy_set_params.migrate_sensitive()
-        
+
+        self.policy_set_params.migrate_sensitive()
+
         self.workspace_vars.migrate_sensitive()
-
-        self.registry_module_versions.migrate_module_version_files()
-
 
 
     def delete_all_from_target(self, no_confirmation):
+
         if no_confirmation or self.confirm_delete_resource_type("run triggers", self._api_target):
             self.run_triggers.delete_all_from_target()
 
@@ -183,12 +195,15 @@ class TFCMigrator(ABC):
         if no_confirmation or \
             self.confirm_delete_resource_type("registry modules", self._api_target):
             self.registry_modules.delete_all_from_target()
-        
+
         if no_confirmation or \
             self.confirm_delete_resource_type("registry modules versions", self._api_target):
             self.registry_module_versions.delete_all_from_target()
 
-        if no_confirmation or self.confirm_delete_resource_type("agent pools", self._api_target):
+        # TODO: is_valid_migration doesn't make sense cause deletion only matters on the target
+        if (no_confirmation \
+            or self.confirm_delete_resource_type("agent pools", self._api_target)) and \
+                self.agent_pools.is_valid_migration():
             self.agent_pools.delete_all_from_target()
 
 

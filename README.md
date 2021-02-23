@@ -1,6 +1,18 @@
 # TFC/E Migration Tool
 
-This tool is designed to help automate the migration from one TFC/E Organization to another, whether that’s TFE to TFC, or vice versa. It's organization to organization. Currently it only supports 1:1 migrations, but the goal is to support 1:N. Note that the source and target organizations may be running on different versions, and because of that, some API endpoints may not exist in one or the other.
+This tool is designed to help automate the migration from one TFC/E organization to another, whether that’s TFE to TFC, or vice versa. Simply put, it transfers data from organization to organization. This tool currently only supports 1:1 migrations, but the goal is to eventually support 1:N migrations in a future version. Note that the source and target organizations may be running on different versions, and because of that, some API endpoints may not exist in one or the other.  At present, the following compatibility testing has been completed:
+
+|                    | TFC Free | TFC Team | TFC Governance | TFC Business | TFC Trial | TFC Legacy | TFE |
+|--------------------|:--------:|:--------:|:--------------:|:------------:|:---------:|:----------:|:---:|
+| **TFC Free**       |     X    |    X     |       X        |       X      |     X     |      X     |  X  |
+| **TFC Team**       |     X    |    X     |       X        |       X      |     X     |      X     |  X  |
+| **TFC Governance** |     X    |    X     |       X        |       X      |     X     |      X     |  X  |
+| **TFC Business**   |     X    |    X     |       X        |       X      |     X     |      X     |  X  |
+| **TFC Trial**      |     X    |    X     |       X        |       X      |     X     |      X     |  X  |
+| **TFC Legacy**     |     X    |    X     |       X        |       X      |     X     |      X     |  X  |
+| **TFE**            |     X    |    X     |       X        |       X      |     X     |      X     |  X  |
+
+For additional background on this tool, as well as a complete step-by-step guide, a companion article can be found [here](https://medium.com/hashicorp-engineering/the-power-of-the-terraform-api-how-to-easily-migrate-any-data-between-enterprise-and-cloud-596e7023eb7f).
 
 If you're trying to migrate from one TFE installation to another TFE installation, use the [backup-restore functionality](https://www.terraform.io/docs/enterprise/admin/backup-restore.html), not this tool.
 
@@ -9,25 +21,28 @@ If you're trying to migrate from one TFE installation to another TFE installatio
 ### 1. Install the Python Dependencies
 
 ```bash
-pip3 install terrasnek==0.0.15
+pip3 install terrasnek==0.0.16
 ```
 
-### 2. Set Required Environment Variables
+### 2. Set Required (and Optional) Environment Variables
 
 ```bash
 # Source organization token, URL, and organization name
 export TFE_TOKEN_SOURCE="foo"
 export TFE_URL_SOURCE="https://app.terraform.io"
 export TFE_ORG_SOURCE="bar"
+export TFE_VERIFY_SOURCE="False" # Optional, defaults to True
 
 # Target organization token, URL, and organization name
 export TFE_TOKEN_TARGET="foo"
 export TFE_URL_TARGET="https://app.terraform.io"
 export TFE_ORG_TARGET="bar"
+export TFE_VERIFY_TARGET="False" # Optional, defaults to True
 ```
 
 * The Token(s) used above must be either a team or user token and have the appropriate level of permissions
 * The URL(s) used above must follow a format of `https://app.terraform.io`
+* The `TFE_VERIFY_SOURCE` and `TFE_VERIFY_TARGET` values should be set to `False` if you want to use HTTP or insecure HTTPS 
 
 ### 3. Build the Required TFE_VCS_CONNECTION_MAP
 
@@ -35,14 +50,14 @@ The TFE_VCS_CONNECTION_MAP is a list of dictionaries, each of which maps a `sour
 
 ```json
 [
-    {
-    "source": "ot-foo",
-    "target": "ot-bar"
-    },
-    {
-    "source": "ot-bar",
-    "target": "ot-baz"
-    }
+   {
+      "source":"ot-foo",
+      "target":"ot-bar"
+   },
+   {
+      "source":"ot-bar",
+      "target":"ot-baz"
+   }
 ]
 ```
 
@@ -55,7 +70,7 @@ By default, the migration tool will load these values from a file named `vcs.jso
 
 Before initiating the migration process, first determine which command line arguments you wish to pass (if any).  The following arguments are currently supported:
 * `--vcs-file-path`: this flag allows you to pass a custom file path for your TFE_VCS_CONNECTION_MAP JSON file. If not specified, `vcs.json` will be used by default.
-* `--migrate-all-state`: this flag allows you to set the desired behavior for migrating state versions.  If passed, all versions of state will get migrated for all workspaces.  If not specificed, only the current version of state for all workspaces will be migrated by default.
+* `--migrate-all-state`: this flag allows you to set the desired behavior for migrating state versions.  If passed, all versions of state will get migrated for all workspaces.  If not specified, only the current version of state for all workspaces will be migrated by default.
 * `> outputs.txt`: this allows you to set the desired behavior for handling outputs.  If passed, all outputs will will be written to an `outputs.txt` file (or file name of your choice).  If not specified, all outputs will appear in the terminal by default.
 
 
@@ -131,8 +146,7 @@ Each of the supported operations outlined above are performed by separate functi
 * `policy_sets_map`: a dictionary that maps the policy set ID from the source organization to the corresponding policy set ID that's created in the target organization
 * `workspace_to_config_version_upload_url_map`: a dictionary that maps the workspace name in the target organization to the configuration version upload URL for that workspace in the target organization
 * `workspace_to_config_version_file_path_map`: a list of dictionaries, each of which contains a workspace name, workspace ID, and file path for the config version files associated with that workspace in the target organization
-* `ssh_key_file_path_map`: a list of dictionaries, each of which contains a SSH key name and file path for the SSH key files associated with that SSH key in the target organization
-* `module_to_file_path_map`: a list of dictionaries, each of which contains a module name and file path for the module version files associated with that module in the target organization
+* `ssh_key_to_file_path_map`: a list of dictionaries, each of which contains a SSH key name and file path for the SSH key files associated with that SSH key in the target organization
 * `sensitive_policy_set_parameter_data`: a list of dictionaries, each of which includes a policy set name, policy set ID, policy set parameter ID, policy set parameter key, policy set parameter value, and policy set parameter category for all policy set parameters in the destination organization that were created from policy set parameters in the source organization that were marked as 'sensitive'
 * `sensitive_variable_data`: a list of dictionaries, each of which includes a workspace name, workspace ID, variable key, variable value, variable description, variable category, and variable type for all workspace variables in the destination organization that were created from workspace variables in the source organization that were marked as 'sensitive'
 
@@ -141,7 +155,7 @@ Each of the supported operations outlined above are performed by separate functi
 
 ## Sensitive Value and File Migration
 
-This migration tool leverages the [Terraform Cloud/Enterprise API](https://www.terraform.io/docs/cloud/api/index.html) and the [terrasnek](https://github.com/dahlke/terrasnek) Python Client for interacting with it.  For security reasons, there are certain sensitive values and files that cannot be extracted via the API, including sensitive workspace variables, sensitive policy set params, SSH keys, module version files, and configuration version files. For that reason, those items will need to be re-added after the initial migration is finished by completing the following steps:
+This migration tool leverages the [Terraform Cloud/Enterprise API](https://www.terraform.io/docs/cloud/api/index.html) and the [terrasnek](https://github.com/dahlke/terrasnek) Python Client for interacting with it.  For security reasons, there are certain sensitive values and files that cannot be extracted via the API, including sensitive workspace variables, sensitive policy set params, SSH keys, and configuration version files. For that reason, those items will need to be re-added after the initial migration is finished by completing the following steps:
 
 ### 1. Update all Missing Values
 
@@ -149,9 +163,7 @@ Once the initial migration is complete and the outputs are generated, save them 
 
 * In the `workspace_to_config_version_file_path_map` list, update the `path_to_config_version_file` value in each dictionary with the correct local file path for that configuration version's configuration version files
 
-* In the `module_to_file_path_map` list, update the `path_to_module_file` value in each dictionary with the correct local file path for that module version's module version files
-
-* In the `ssh_key_to_file_path_map` list, update the `path_to_ssh_key_file` value in each dictionary with the correct local file path for that SSH key's SSH key files 
+* In the `ssh_key_to_file_path_map` list, update the `path_to_ssh_key_file` value in each dictionary with the correct local file path for that SSH key's SSH key files
 
 * In the `sensitive_policy_set_parameter_data` list, update the `parameter_value` value in each dictionary with the sensitive parameter value for that sensitive parameter key
 
